@@ -14,3 +14,11 @@
 - **Chunk Metadata Map (Member 4):** Guarded by a Read-Write lock (`shared_mutex`) to coordinate parallel chunk workers and instant replica failover upon `onPeerDead()` callbacks.
 - **Hold-Back Buffer (Member 3):** Guarded by a `mutex` to enforce per-sender FIFO sequence ordering and duplicate suppression for group chat messages.
 - **Retransmission Queue (Member 1):** Guarded by a `mutex` + `condition_variable` waking the RTO Timer and UDP Ingress threads for reliable multi-stream UDP framing.
+
+## 3. Observer Callback Thread-Safety & Deadlock-Prevention Contract
+To guarantee zero circular deadlocks across module boundaries when `MembershipManager` dispatches `onPeerJoin(PeerInfo)`, `onPeerLeave(PeerID)`, or `onPeerDead(PeerID)`:
+
+1. **Snapshot-and-Release Pattern (No Lock Held During Dispatch):** The Liveness Sweeper (`250 ms`) and UDP Ingress thread acquire the `ActivePeerTable` write lock *only* to mutate state (`ALIVE` $\rightarrow$ `SUSPECT` $\rightarrow$ `DEAD`) and collect a local list of pending lifecycle events. The write lock is **explicitly released** before invoking any registered observer callback.
+2. **Immutable Snapshot Subscribers:** Callbacks are registered during node initialization (before worker threads spawn) into an immutable `std::vector` (or atomic copy-on-write snapshot), avoiding lock contention during callback iteration.
+3. **Re-Entrant Safe API Calls:** Because no Membership lock is held during callback execution, downstream subscribers (Member 3 Chat Engine and Member 4 Distributed Storage Manager) can safely call `getActivePeers()` (acquiring `shared_mutex` read access) or enqueue tasks onto their own internal mutex-guarded queues without creating lock-order inversions (`Lock_Membership` $\leftrightarrow$ `Lock_Storage`).
+4. **Non-Blocking Subscriber Rule:** Subscribers must execute lightweight state updates or push work onto an asynchronous worker queue inside callbacks rather than performing blocking network I/O on the Membership sweeper thread.
