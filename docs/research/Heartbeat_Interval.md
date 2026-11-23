@@ -365,7 +365,6 @@ The implementation should avoid sending unnecessary heartbeat messages to unknow
 These limitations will be addressed through testing and membership synchronization.
 
 ## 11. Testing and Validation Plan
-
 | Test ID | Test scenario | Expected result |
 |---|---|---|
 | ADR02-T01 | Start four peers on the same LAN | All four peers discover each other and join |
